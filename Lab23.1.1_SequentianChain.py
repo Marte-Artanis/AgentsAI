@@ -78,10 +78,6 @@ prompt_final = PromptTemplate(
     """
 )
 
-
-
-
-
 chain_base_conhecimento = prompt_base_conhecimento | openai
 chain_historico_conversas = prompt_historico_conversas | openai
 chain_final = prompt_final | openai
