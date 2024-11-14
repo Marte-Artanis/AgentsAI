@@ -1,0 +1,8 @@
+# Ignorar arquivos de ambiente
+.env
+
+# Ignorar arquivos de log
+*.log
+
+# Ignorar o ambiente virtual
+.venv/
