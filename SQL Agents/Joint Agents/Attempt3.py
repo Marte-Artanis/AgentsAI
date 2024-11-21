@@ -1,5 +1,4 @@
 from langchain_openai import ChatOpenAI
-
 from langchain.prompts import ChatPromptTemplate
 from langchain_core.messages import SystemMessage, HumanMessage
 from dotenv import load_dotenv
@@ -264,9 +263,7 @@ class MainAgent:
 # Exemplo de uso
 if __name__ == "__main__":
     main_agent = MainAgent()
-    
-    print("Bem-vindo ao chat de análise de dados! Digite 'sair' para encerrar.")
-    
+        
     while True:
         user_query = input("Você: ")
         
