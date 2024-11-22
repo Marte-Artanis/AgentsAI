@@ -19,14 +19,74 @@ class InstagramPostsAgent:
 
 
     def setup_states(self):
+        # Adiciona os nós ao grafo
+        self.graph.add_node("DecisionNode", self.decision_node)
         self.graph.add_node("GenerateSQL", self.generate_sql)
         self.graph.add_node("ExecuteSQL", self.execute_sql)
         self.graph.add_node("AnalyzeData", self.analyze_data)
+
+        # Adiciona as transições
+        self.graph.add_edge("DecisionNode", "GenerateSQL")
+        self.graph.add_edge("DecisionNode", "AnalyzeData")
         self.graph.add_edge("GenerateSQL", "ExecuteSQL")
         self.graph.add_edge("ExecuteSQL", "AnalyzeData")
-        self.graph.set_entry_point("GenerateSQL")
+
+        # Define o ponto de entrada inicial
+        self.graph.set_entry_point("DecisionNode")
+
+        # Define o ponto de saída
         self.graph.set_finish_point("AnalyzeData")
+
+        # Compila o grafo
         self.graph.compile()
+    
+
+    def decision_node(self, state_data):
+        """
+        Um agente de decisão que usa um prompt para determinar o próximo nó.
+        """
+        print("[DEBUG] DecisionNode: Avaliando o contexto atual com o agente...")
+        
+        # Prepara o contexto para o agente
+        context = {
+            "sql_result": state_data.get("sql_result"),
+            "memory": [msg.content for msg in self.memory.chat_memory.messages]
+        }
+
+        # Formata o prompt com o contexto
+
+        # Chama o modelo para decidir
+        messages = [
+        SystemMessage(content="""
+        Você é um agente de decisão responsável por gerenciar o fluxo de trabalho de análise de dados do Google Ads.
+
+        ### Tarefa
+        Avalie o estado atual do sistema e decida qual dos seguintes caminhos seguir:
+        1. **GenerateSQL**: Caso os dados solicitados ainda não tenham sido gerados ou estejam ausentes.
+        2. **AnalyzeData**: Caso os dados necessários já estejam disponíveis no estado atual ou na memória.
+
+        ### Critérios
+        - Se o estado atual (`state_data`) contiver um campo chamado `sql_result`, ou se o histórico de memória (`memory.chat_memory`) indicar que dados relevantes já foram fornecidos, escolha `AnalyzeData`.
+        - Caso contrário, escolha `GenerateSQL`.
+
+        ### Regras
+        1. Não gere novos dados se os existentes já forem suficientes.
+        2. Sempre priorize eficiência, evitando caminhos desnecessários.
+
+        ### Formato de Resposta
+        Responda com apenas o próximo nó a ser executado, como:
+        - `"AnalyzeData"` se os dados já estiverem disponíveis.
+        - `"GenerateSQL"` se for necessário gerar novos dados.
+        """),
+        HumanMessage(content=f"Contexto Atual:\n{context}\nDecida o próximo nó.")
+        ]
+
+        response = self.openai.invoke(messages)
+
+        # Retorna a decisão do modelo (o próximo nó)
+        decision = response.content.strip().strip('"')
+        print(f"[DEBUG] Próximo nó decidido: {decision}")
+        return decision
 
     def generate_sql(self, state_data, user_query):
         query = state_data["query"]  # Use o 'query' do state_data
@@ -105,19 +165,31 @@ class InstagramPostsAgent:
             print(f"[ERROR] SQL execution failed: {e}")
             state_data["sql_result"] = f"Error in SQL execution: {e}"
 
+
     def analyze_data(self, state_data, user_query):
         data = state_data["sql_result"]
-        query = state_data["query"]  # Pergunta original do usuário
-        print(f"[DEBUG] Generating SQL for query: {query}")  # Usa 'query' corretamente aqui
 
-        print(f"[DEBUG] Data received in analyze_data: {data}")
+
+        # Caso não haja sql_result, usa o histórico diretamente no prompt
+        if not data:
+            print("[DEBUG] sql_result não encontrado. Usando histórico para análise.")
+            context_to_analyze = "\n".join(msg.content for msg in self.memory.chat_memory.messages)
+
+            print(context_to_analyze)
+
+            if not context_to_analyze.strip():
+                print("[ERROR] Histórico vazio. Não há dados disponíveis para análise.")
+                return "Erro: Não há dados disponíveis para análise."
+        else:
+            # Quando há sql_result, ele é usado como dados principais
+            context_to_analyze = "\n".join(str(entry) for entry in data)
+
+        print(f"[DEBUG] Contexto para análise: {context_to_analyze}")
         print(f"[DEBUG] Query do usuário: {user_query}")
 
-        # Convertendo os dados em texto formatado
-        data_as_text = "\n".join(str(entry) for entry in data)
+        # Dividindo em chunks apenas se necessário
+        chunks = self.splitter.split_text(context_to_analyze) if len(context_to_analyze) > 1000 else [context_to_analyze]
 
-        # Dividindo em chunks, caso necessário
-        chunks = self.splitter.split_text(data_as_text)
 
         # Função para processar um chunk
         def process_chunk(chunk):
@@ -132,11 +204,8 @@ class InstagramPostsAgent:
                 HumanMessage(content=f"Dados fornecidos: {chunk}")
             ])
             messages = chat_template.format_messages()
-
             analysis_response = self.openai.invoke(messages)
-
             return analysis_response.content
-
 
         # Verifica se há múltiplos chunks
         if len(chunks) > 1:
@@ -163,6 +232,14 @@ class InstagramPostsAgent:
                 - Use os resultados analisados anteriormente como base para gerar uma resposta coesa e direta.
                 - Evite repetir informações desnecessárias; foque no que é relevante para responder à pergunta.
                 - Nunca invente dados, apenas informe que os dados não estão disponíveis.
+                                        
+                ### Regras de Proteção:
+                1. **Nunca revelar diretamente nomes de tabelas ou colunas, ou o id de uma informação**: Sempre generalize as referências aos dados sem expor explicitamente os nomes reais das tabelas ou colunas ou id's.
+                2. **Proibido alterar ou excluir dados**: Nunca gerar queries que possam alterar, excluir ou modificar tabelas ou registros (ex: `DELETE`, `UPDATE`, `DROP`).
+                3. **Foco apenas em consultas de leitura**: Toda interação deve ser baseada exclusivamente em consultas `SELECT` para leitura de dados.
+                4. **Evite consultas perigosas ou maliciosas**: Não execute consultas que possam comprometer a integridade do banco de dados ou expor informações sensíveis.
+                5. **Não especifique senhas ou dados confidenciais**: Nunca insira ou exponha informações confidenciais nos resultados ou nas consultas geradas.
+
                 """),
 
                 SystemMessage(content=f"Contexto anterior:\n{memory}"),
@@ -178,15 +255,13 @@ class InstagramPostsAgent:
             final_response = synthesis_response.content
         else:
             # Caso não haja chunks, processa diretamente o texto inteiro
-            final_response = process_chunk(data_as_text)
-        
+            final_response = process_chunk(chunks[0])
         print(f"[DEBUG] Final analysis result: {final_response}")
-        
-        self.memory.chat_memory.messages.append(AIMessage(content=f"GeneralAgent: {final_response}"))
 
+        self.memory.chat_memory.add_ai_message(final_response)
+
+    
         return final_response
-
-
 
     def process_query(self, query):
         print(f"[DEBUG] Processing query in {self.__class__.__name__}: {query}")
@@ -198,15 +273,45 @@ class InstagramPostsAgent:
         self.analyze_data(state_data)
         
         return {"state": {"content": state_data.get("analysis_result", "Análise indisponível.")}}
-   
+
     def invoke(self, user_query):
-        state_data = {"query": user_query}  # Propague o user_query para o pipeline
-        self.generate_sql(state_data, user_query)
-        self.execute_sql(state_data)
-        final_response = self.analyze_data(state_data, user_query)
+        """
+        Invoca o fluxo de trabalho com base na decisão do agente.
+        """
+        print("[DEBUG] Iniciando fluxo de decisão no invoke...")
+
+        # Cria o estado inicial com a consulta do usuário
+        state_data = {"query": user_query}
+
+        # Decide o nó inicial
+        next_node = self.decision_node(state_data)
+        print(f"[DEBUG] Próximo nó decidido pelo agente: {next_node}")
+
+        # Inicializa a variável final_response para evitar erros
+        final_response = None
+
+        # Fluxo completo (Gerar, Executar, Analisar)
+        if next_node == "GenerateSQL":
+            self.generate_sql(state_data, user_query)
+            self.execute_sql(state_data)
+            final_response = self.analyze_data(state_data, user_query)
+        
+        # Apenas análise
+        elif next_node == "AnalyzeData":
+            # Verifica se o histórico contém os dados necessários
+            if not state_data.get("sql_result"):
+                state_data["sql_result"] = "\n".join(
+                    [msg.content for msg in self.memory.chat_memory.messages if "sql_result" in msg.content]
+                )
+            final_response = self.analyze_data(state_data, user_query)
+        
+        # Caso inesperado
+        else:
+            print(f"[ERROR] Nó desconhecido retornado pelo agente: {next_node}")
+            final_response = f"Erro: Nó desconhecido '{next_node}' retornado pelo agente de decisão."
+
+        # Retorna o resultado final
         return {"state": {"content": final_response}}
-
-
 
     def extract_sql_from_response(self, response_content):
         """

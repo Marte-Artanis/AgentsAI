@@ -5,12 +5,28 @@ from shared import memory
 
 class ConsolidationAgent:
     def __init__(self):
+        """
+        Inicializa o agente de consolidação, que é responsável por reunir, processar e consolidar 
+        respostas provenientes de vários agentes em uma única resposta coesa.
+        """
         self.openai = ChatOpenAI(model_name="gpt-4o-mini")
         self.memory = memory  # Memória compartilhada
 
 
     def consolidate_responses(self, user_query, instagram_response, meta_response, google_response, crm_response):
-        # Verificar se as respostas estão sendo passadas corretamente
+        """
+        Consolida respostas de diferentes agentes e gera uma análise unificada.
+
+        Args:
+            user_query (str): Pergunta original do usuário.
+            instagram_response (str): Resposta do agente Instagram.
+            meta_response (str): Resposta do agente Meta Ads.
+            google_response (str): Resposta do agente Google Ads.
+            crm_response (str): Resposta do agente CRM.
+
+        Returns:
+            str: Resposta consolidada para a pergunta do usuário.
+        """
         print(f"[DEBUG] ConsolidationAgent - Instagram Response: {instagram_response}")
         print(f"[DEBUG] ConsolidationAgent - MetaAds Response: {meta_response}")
         print(f"[DEBUG] ConsolidationAgent - GoogleAds Response: {google_response}")
@@ -44,7 +60,7 @@ class ConsolidationAgent:
         {crm_response}
 
         """
-
+        # Define o prompt para consolidação
         chat_template = ChatPromptTemplate.from_messages([
             SystemMessage(content=f"""           
                 Você é um agente altamente especializado em consolidar e analisar dados provenientes de diferentes fontes, como Instagram, Meta Ads e Google Ads, para responder a perguntas específicas feitas por usuários.
@@ -80,16 +96,31 @@ class ConsolidationAgent:
             HumanMessage(content=f"Consolide a análise a seguir em um único texto:\n{combined_content}")
         ])
 
+        # Formata o prompt e envia a solicitação ao modelo
         messages = chat_template.format_messages()
         consolidation_response = self.openai.invoke(messages)
         print(f"[DEBUG] ConsolidationAgent - Consolidated Response: {consolidation_response.content}")
 
-
+        # Adiciona a resposta consolidada à memória compartilhada
         self.memory.chat_memory.add_ai_message(consolidation_response)
 
+        # Retorna a resposta consolidada
         return consolidation_response.content
 
     def invoke(self, user_query, instagram_response, meta_response, google_response, crm_response):
+        """
+        Interface de invocação para o agente de consolidação.
+
+        Args:
+            user_query (str): Pergunta original do usuário.
+            instagram_response (str): Resposta do agente Instagram.
+            meta_response (str): Resposta do agente Meta Ads.
+            google_response (str): Resposta do agente Google Ads.
+            crm_response (str): Resposta do agente CRM.
+
+        Returns:
+            str: Resposta consolidada gerada.
+        """
         return self.consolidate_responses(user_query, instagram_response, meta_response, google_response, crm_response)
 
 

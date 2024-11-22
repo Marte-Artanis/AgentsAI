@@ -14,6 +14,11 @@ memory = ConversationBufferMemory(memory_key="chat_history", return_messages=Tru
 
 # Definindo um esquema usando TypedDict
 class StateSchema(TypedDict):
+    """
+    Define um esquema de dicionário tipado para descrever o estado do agente.
+    - `query (str)`: Representa a consulta atual do usuário.
+    - `state_data (dict)`: Contém dados relacionados ao estado atual da execução.
+    """
     query: str
     state_data: dict
 
